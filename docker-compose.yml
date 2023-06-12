@@ -1,0 +1,116 @@
+version: "3.3"
+services:
+  traefik:
+    image: "traefik:v2.10"
+    restart: always
+    container_name: "traefik"
+    command:
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.tlschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.email=toto@toto.com"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "8080:8080"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./letsencrypt:/letsencrypt"
+# mariaDB Container
+  dbglpi:
+    image: mariadb:10.11-rc
+    container_name: "db-glpi"
+    restart: always
+    command: --transaction-isolation=READ-COMMITTED --binlog-format=ROW
+    volumes:
+      - ./db:/data/traefik-glpi-wordpress/dbglpi
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_PASSWORD=password
+      - MYSQL_DATABASE=glpi
+      - MYSQL_USER=user
+
+#GLPI Container
+  glpi:
+    image: jr0w3/glpi:latest
+    restart: always
+    container_name: "glpi"
+    links:
+      - dbglpi
+    volumes:
+      - ./data:/data/traefik-glpi-wordpress/glpi
+    environment:
+      - MYSQL_PASSWORD=password
+      - MYSQL_DATABASE=glpi
+      - MYSQL_USER=user
+      - MYSQL_HOST=dbglpi
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.glpi.rule=Host(`helpdesk.aurelienr.learn-it.ovh`)"
+      - "traefik.http.routers.glpi.service=glpiService"
+      - "traefik.http.services.glpiService.loadBalancer.server.port=80"
+      - "traefik.http.routers.glpi.entrypoints=websecure"
+      - "traefik.http.routers.glpi.tls.certresolver=myresolver"
+#Wordpress Container
+  wordpress:
+    image: wordpress
+    restart: always
+    container_name: "wordpress"
+    environment:
+      WORDPRESS_DB_HOST: dbwordpress
+      WORDPRESS_DB_USER: userwordpress
+      WORDPRESS_DB_PASSWORD: passwordpress
+      WORDPRESS_DB_NAME: dbforwordpress
+    volumes:
+      - ./wordpress:/data/traefik-glpi-wordpress/wordpress
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.wordpress.rule=Host(`extranet.aurelienr.learn-it.ovh`)"
+      - "traefik.http.routers.wordpress.service=wordpressService"
+      - "traefik.http.services.wordpressService.loadBalancer.server.port=80"
+      - "traefik.http.routers.wordpress.entrypoints=websecure"
+      - "traefik.http.routers.wordpress.tls.certresolver=myresolver"
+  dbwordpress:
+    image: mysql:5.7
+    container_name: "db-wordpress"
+    restart: always
+    environment:
+      MYSQL_DATABASE: dbforwordpress
+      MYSQL_USER: userwordpress
+      MYSQL_PASSWORD: passwordpress
+      MYSQL_RANDOM_ROOT_PASSWORD: '1'
+    volumes:
+      - ./db:/data/traefik-glpi-wordpress/dbwordpress
+
+#Nextcloud Container
+  dbnextcloud:
+    image: mariadb:10.6
+    restart: always
+    container_name: "dbnextcloud"
+    environment:
+      - MYSQL_ROOT_PASSWORD=passrootnextcloud
+      - MYSQL_USER=usernextcloud
+      - MYSQL_PASSWORD=passnextcloud
+      - MYSQL_DATABASE=dbnextcloud
+  nextcloud:
+    image: nextcloud:latest
+    restart: always
+    container_name: "nextcloud"
+    environment:
+      - MYSQL_HOST=dbnextcloud
+      - MYSQL_DB=dbnextcloud
+      - MYSQL_USER=usernextcloud
+      - MYSQL_PASSWORD=passnextcloud
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.nextcloud.rule=Host(`cloud.aurelienr.learn-it.ovh`)"
+      - "traefik.http.routers.nextcloud.service=nextcloudService"
+      - "traefik.http.services.nextcloudService.loadBalancer.server.port=80"
+      - "traefik.http.routers.nextcloud.entrypoints=websecure"
+      - "traefik.http.routers.nextcloud.tls.certresolver=myresolver"
